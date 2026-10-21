@@ -1,0 +1,17 @@
+# Streamlit secrets (Google service account, cookie key, admin account).
+# Set these in the Community Cloud app settings instead of committing them.
+.streamlit/secrets.toml
+
+# Ignore __pycache__ directories
+__pycache__/
+
+# Ignore other common files and directories
+*.pyc
+*.pyo
+*.pyd
+*.swp
+*.swo
+*.bak
+*.tmp
+*.log
+*.DS_Store

@@ -1,0 +1,25 @@
+streamlit==1.37.1
+streamlit_antd_components==0.3.2
+streamlit-authenticator==0.4.1
+# Streamlit 1.37.1 requires rich<14. Pinned explicitly because it is only an
+# indirect dependency: left unpinned, a later `pip install` in the same
+# environment resolves rich to 15.x and breaks that constraint after the fact.
+# Community Cloud installs its own rich after this file ("Installing rich for an
+# improved exception logging") and overrides the pin regardless; that is
+# harmless - the app and Streamlit's rich traceback path both work on rich 15.
+rich==13.9.4
+pandas==2.2.3
+# Matches the version final_model.joblib was saved with, so it loads without an
+# InconsistentVersionWarning. 1.8 is also a hard floor: on 1.7.x the pickled
+# LogisticRegression fails outright (no attribute 'multi_class').
+# NOTE: scikit-learn 1.8+ requires Python >= 3.11. Community Cloud ignores
+# .python-version and cannot change an app's Python version after deployment,
+# so choose 3.12 under Advanced settings when first deploying this app.
+scikit-learn==1.8.0
+shap==0.51.0
+matplotlib==3.11.1
+numpy==2.4.6
+joblib==1.5.3
+gspread==6.1.4
+oauth2client==4.1.3
+google-api-python-client==2.160.0
