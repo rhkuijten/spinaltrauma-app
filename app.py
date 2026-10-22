@@ -16,6 +16,8 @@ def main():
             st.session_state["authenticated"] = True
 
     if st.session_state.get("authenticated"):
+            if "login_message" in st.session_state:
+                st.toast(st.session_state.pop("login_message"))
             menu_items = create_menu()
             selected_menu_item = handle_menu(menu_items)
             render_page(selected_menu_item)

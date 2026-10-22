@@ -1,9 +1,11 @@
+import re
 import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 from cookies import get_cookie, set_cookie
 
 SPREADSHEET_ID = st.secrets.get("spreadsheet_id")
+EMAIL_PATTERN = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 def fetch_users_from_db():
     credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"],
@@ -41,21 +43,27 @@ def login(users):
             submit_button = st.form_submit_button("Login")
 
         if submit_button:
+            email = email.strip()
+            if not EMAIL_PATTERN.fullmatch(email):
+                st.error("Please enter a valid email address.")
+                return False
+
             if email in users:
                 if users[email] != allow_contact:
-                    st.info("Your feedback preference has been updated.")
-                    user_to_db(email, allow_contact, update=True) 
+                    user_to_db(email, allow_contact, update=True)
+                    st.session_state["login_message"] = "Your feedback preference has been updated."
                 else:
-                    st.success("Welcome back!")
+                    st.session_state["login_message"] = "Welcome back!"
             else:
                 user_to_db(email, allow_contact)
-                st.success("New user registered successfully!")
-            
+                st.session_state["login_message"] = "New user registered successfully!"
+
             st.session_state["authenticated"] = True
             st.session_state["email"] = email
             set_cookie("authenticated_email", email, expiry_days=30)
-            
-            return True
+
+            # Rerun so the login form is not rendered once the user is authenticated
+            st.rerun()
     
     return False
             
@@ -75,7 +83,6 @@ def user_to_db(email, allow_contact, update=False):
             st.error("Error updating user: Email not found.")
     else:
         sheet.append_row([email, allow_contact])
-        st.info(f"User '{email}' added successfully.")
     
 
 def logout():
