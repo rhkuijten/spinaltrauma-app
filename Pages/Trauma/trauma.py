@@ -16,15 +16,17 @@ def trauma_page():
 
     st.header("Decision Tool")
 
+    # Every input starts empty: the model has not been tested with missing values,
+    # so nothing is pre-filled and Predict stays disabled until all are entered.
     st.markdown("<h2 class='section-header'>Patient characteristics</h2>", unsafe_allow_html=True)
     col1, col2 = st.columns(2)
     with col1:
         age = st.number_input(
-            "Age (years)", value=60, min_value=18, max_value=120, step=1, on_change=reset_state
+            "Age (years)", value=None, min_value=18, max_value=120, step=1, on_change=reset_state
         )
         bmi = st.number_input(
             "BMI (kg/m²)",
-            value=25.0,
+            value=None,
             min_value=10.0,
             max_value=80.0,
             step=0.1,
@@ -32,11 +34,11 @@ def trauma_page():
             on_change=reset_state,
         )
     with col2:
-        sex = st.radio("Sex", tu.labels(tu.SEX_OPTIONS), on_change=reset_state)
+        sex = st.radio("Sex", tu.labels(tu.SEX_OPTIONS), index=None, on_change=reset_state)
         asa = st.selectbox(
             "ASA classification",
             tu.labels(tu.ASA_OPTIONS),
-            index=1,
+            index=None,
             on_change=reset_state,
             help="American Society of Anesthesiologists physical status classification.",
         )
@@ -44,7 +46,7 @@ def trauma_page():
     mfi5 = st.selectbox(
         "mFI-5 frailty index",
         tu.labels(tu.MFI5_OPTIONS),
-        index=0,
+        index=None,
         on_change=reset_state,
         help="5-item modified frailty index: number of items present. "
         "Three or more items are treated as a single group by the model.",
@@ -56,14 +58,12 @@ def trauma_page():
         intentie = st.selectbox(
             "Injury mechanism",
             tu.labels(tu.INTENTIE_OPTIONS),
-            index=3,
+            index=None,
             on_change=reset_state,
-            help="Select 'Not recorded / unknown' if the mechanism is not documented; "
-            "the model handles this as a missing value.",
         )
         iss08 = st.number_input(
             "Injury Severity Score (ISS-08)",
-            value=9,
+            value=None,
             min_value=0,
             max_value=75,
             step=1,
@@ -73,7 +73,7 @@ def trauma_page():
     with col4:
         n_fractures = st.number_input(
             "Number of fractures",
-            value=1,
+            value=None,
             min_value=1,
             step=1,
             on_change=reset_state,
@@ -82,7 +82,7 @@ def trauma_page():
         tbi_ct = st.radio(
             "Traumatic brain injury on CT",
             tu.labels(tu.TBI_CT_OPTIONS),
-            index=0,
+            index=None,
             on_change=reset_state,
         )
 
@@ -90,7 +90,7 @@ def trauma_page():
     col5, col6 = st.columns(2)
     with col5:
         st.write("**AO Spine fracture type(s)**")
-        st.caption("Types are not mutually exclusive - tick every type present.")
+        st.caption("Types are not mutually exclusive - tick every type present (at least one).")
         ao_types = {
             column: st.checkbox(
                 tu.AO_TYPE_LABELS[column], key=f"ao_{column}", on_change=reset_state
@@ -99,7 +99,7 @@ def trauma_page():
         }
     with col6:
         st.write("**Spinal region(s) involved**")
-        st.caption("Tick every region involved.")
+        st.caption("Tick every region involved (at least one).")
         regions = {
             column: st.checkbox(
                 tu.REGION_LABELS[column], key=f"region_{column}", on_change=reset_state
@@ -111,7 +111,7 @@ def trauma_page():
     asia = st.selectbox(
         "ASIA impairment scale",
         tu.labels(tu.ASIA_OPTIONS),
-        index=4,
+        index=None,
         on_change=reset_state,
         help="Select 'Exam not performable' when the neurological examination could not be "
         "carried out, for example due to intubation, sedation, or severe traumatic brain "
@@ -123,8 +123,33 @@ def trauma_page():
     if "trauma_explanation_plot" not in st.session_state:
         st.session_state["trauma_explanation_plot"] = None
 
+    required = {
+        "Age": age,
+        "BMI": bmi,
+        "Sex": sex,
+        "ASA classification": asa,
+        "mFI-5 frailty index": mfi5,
+        "Injury mechanism": intentie,
+        "Injury Severity Score": iss08,
+        "Number of fractures": n_fractures,
+        "Traumatic brain injury on CT": tbi_ct,
+        "ASIA impairment scale": asia,
+    }
+    missing = [label for label, value in required.items() if value is None]
+    # A checkbox has no empty state, so "none ticked" is what an unanswered group
+    # looks like. Every spinal fracture has an AO type and a region.
+    if not any(ao_types.values()):
+        missing.append("AO Spine fracture type")
+    if not any(regions.values()):
+        missing.append("Spinal region")
+
     st.write("")
-    if st.button("Predict"):
+    if missing:
+        st.info(
+            "The model has not been tested with missing values, so every field must be "
+            f"filled in before a prediction can be made. Still missing: {', '.join(missing)}."
+        )
+    if st.button("Predict", disabled=bool(missing)):
         with st.spinner("Predicting..."):
             pipeline = tu.load_model()
 
@@ -176,23 +201,29 @@ def trauma_page():
             st.write(
                 """
                 The figure above shows the contribution of each factor to the model's prediction.
-                Please consult the *Evaluation* page at *Clinical interpretation* for explanation on
-                how to interpret a prediction in clinical setting.
+                Please consult the *Evaluation* page at *Clinical Interpretation* for three worked
+                examples and for explanation on how to interpret a prediction in clinical setting.
 
-                The chain starts at the average predicted mortality across the development cohort,
-                at the bottom, and each bar moves it up (green) or down (red) until it reaches this
-                patient's prediction at the top. Contributions are shown in **percentage points of
-                absolute risk**, so they can be read directly against the predicted probability.
+                Read the figure from the bottom to the top. It starts at the **reference** risk of
+                5.2%: the predicted risk of a hypothetical patient with average values for all
+                predictors. This is not the average predicted risk or the observed mortality in the
+                development cohort, which are both 13.3%. Each bar then moves the risk up (**red**)
+                or down (**green**) until it reaches this patient's prediction, shown in bold at the
+                top. Contributions are shown in **percentage points of absolute risk**, so they can be
+                read directly against the predicted probability.
 
                 One caveat on that scale: the model works in log-odds, where the contributions are
                 exactly additive. Putting them in percentage points rescales them by a single
                 positive factor, so every contribution keeps its direction and the ranking is
                 unchanged, but each number is that predictor's *share of the total shift* from the
-                cohort average rather than its effect in isolation.
+                reference rather than its effect in isolation.
 
-                Age is modelled as a spline, and its components are added back together here so it
-                appears as a single row. *Neurological exam not possible* is derived from the ASIA
-                field rather than asked separately, so it appears as its own row.
+                Age is modelled as a spline and the injury mechanism as a set of categories; each is
+                added back together here so it appears as a single row. Predictors whose
+                contribution is 5% or less of all contributions added together (regardless of
+                direction) are combined into *Other predictors*.
+                *Neurological exam not possible* is derived from the ASIA field rather than asked
+                separately, so it appears as its own row.
 
                 ### Explanation of Prediction Factors
 

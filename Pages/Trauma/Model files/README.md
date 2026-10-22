@@ -31,11 +31,13 @@ pipeline, in order:
 | `TBI_CT` | 0 / 1 |
 | `TYPE_A_INJURY`, `TYPE_B_INJURY`, `TYPE_C_INJURY`, `TYPE_F_INJURY` | 0 / 1, not mutually exclusive |
 | `C`, `T`, `L`, `S` | `'JA'` / `'NEE'` |
-| `INTENTIE` | raw mechanism code, or `NaN` for unknown |
+| `INTENTIE` | raw mechanism code |
 
 `INTENTIE` is sent as one representative raw code per group: 1 = MVA, 4 = OVA,
-7 = violence, 10 = low-energy fall (reference), 11 = high-energy fall, 12 = other,
-`NaN` = unknown.
+7 = violence, 10 = low-energy fall (reference), 11 = high-energy fall, 12 = other.
+The pipeline also has an "unknown" level for a missing code, but the app does not
+offer it: the model has not been tested with missing values, so the decision tool
+requires every input to be filled in.
 
 `NEURO_NOT_EXAMINABLE` and `INTENTIE_cat` are derived by the pipeline and are
 deliberately not collected by the app.

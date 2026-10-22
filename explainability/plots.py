@@ -23,7 +23,7 @@ _XLABEL = "Impact on predicted log-odds of 30-day mortality"
 _LABEL_SIZE = 11
 
 # Waterfall palette: raises risk / lowers risk.
-_UP, _DOWN = "#2E8B2E", "#F08080"
+_UP, _DOWN = "#F08080", "#2E8B2E"
 
 
 def _normalize_fonts(ax) -> None:
@@ -144,37 +144,9 @@ def plot_global_summary(expl, top_n: int = 15, save_path=None):
     return fig
 
 
-def _integer_split(values: np.ndarray, total: int) -> np.ndarray:
-    """Round values to integers summing to total, without flipping any sign.
-
-    Rounds half away from zero, then pushes the leftover units onto the largest
-    contributions one at a time. An adjustment is skipped if it would give a row
-    the opposite sign to its true value, which would otherwise print "+0%" beside
-    a bar drawn in the colour for a decrease.
-
-    Args:
-        values: Contributions in percentage points, summing to total.
-        total: The integer the rounded values must add up to.
-
-    Returns:
-        Integer array of the same length, summing to total where the sign
-        constraint allows.
-    """
-    out = (np.sign(values) * np.floor(np.abs(values) + 0.5)).astype(int)
-    drift = total - out.sum()
-    if drift:
-        step = int(np.sign(drift))
-        # Spend the leftover units on the rows that were rounded furthest in the
-        # opposite direction, one unit each, so no row moves by a whole point.
-        residual = values - out
-        for i in np.argsort(-residual if step > 0 else residual):
-            if not drift:
-                break
-            if values[i] and np.sign(out[i] + step) == -np.sign(values[i]):
-                continue
-            out[i] += step
-            drift -= step
-    return out
+def _shown_value(value) -> str:
+    """Format one predictor value for a row label: a number, or a category level."""
+    return f"{value:g}" if isinstance(value, (int, float, np.number)) else str(value)
 
 
 def _probability_contributions(expl, index: int):
@@ -204,6 +176,31 @@ def _probability_contributions(expl, index: int):
     return share * (p_pred - p_base) * 100.0, p_base, p_pred
 
 
+def _waterfall_rows(pp, names, data, top_n: int, group_threshold_pct: float | None):
+    """Pool small signed contributions, retaining the exact total risk difference.
+
+    A threshold replaces the top-n limit: every predictor whose share of the
+    patient's summed absolute contributions is above the threshold is retained,
+    even if that yields more than top_n individual bars. The share is relative so
+    a low-risk patient, whose contributions are all small in percentage points,
+    is not reduced to one pooled bar. Pooling uses signed values.
+    """
+    order = np.argsort(-np.abs(pp))
+    if group_threshold_pct is None:
+        shown, pooled = order[:top_n], order[top_n:]
+    else:
+        if not np.isfinite(group_threshold_pct) or group_threshold_pct < 0:
+            raise ValueError("group_threshold_pct must be finite and non-negative")
+        total = np.abs(pp).sum()
+        share = 100 * np.abs(pp[order]) / total if total else np.zeros(len(pp))
+        individual = share > group_threshold_pct
+        shown, pooled = order[individual], order[~individual]
+    rows = [(f"{_shown_value(data[i])} = {names[i]}", pp[i]) for i in shown]
+    if len(pooled):
+        rows.append((f"Other predictors (n = {len(pooled)})", pp[pooled].sum()))
+    return rows
+
+
 def _chevron(ax, x0: float, x1: float, y: float, color: str, height: float = 0.62):
     """Draw one waterfall bar from x0 to x1, pointed in its direction of travel."""
     tip = min(abs(x1 - x0) * 0.35, np.ptp(ax.get_xlim()) * 0.012)
@@ -221,32 +218,39 @@ def _waterfall_xlim(rows, p_base: float, p_pred: float) -> tuple[float, float]:
         seen.append(cursor)
     lo, hi = min(seen), max(seen)
     pad = max((hi - lo) * 0.12, 0.02)
-    return max(0.0, lo - pad), min(1.0, hi + pad)
+    # Intermediate sums of the allocated contributions are not predictions and
+    # can cross 0 or 1. Keep those bars visible instead of clipping their tips.
+    left = max(0.0, lo - pad) if lo >= 0 else lo - pad
+    right = min(1.0, hi + pad) if hi <= 1 else hi + pad
+    return left, right
 
 
-def _bar_label(ax, x0: float, x1: float, y: float, value: int, color: str) -> None:
-    """Write the signed percentage inside the bar, or beside it when it is too thin."""
-    # An unsigned "0%" for rows that round away: a signed one would contradict the
-    # bar's colour whenever the sign and the rounding disagree.
-    text = f"{value:+d}%" if value else "0%"
-    if abs(x1 - x0) > np.ptp(ax.get_xlim()) * 0.075:
+def _bar_label(ax, x0: float, x1: float, y: float, value: float, color: str) -> None:
+    """Label contributions as absolute risk change in %, rounded only for display."""
+    text = f"{value:+.1f}%" if round(value, 1) else "0.0%"
+    if abs(x1 - x0) > np.ptp(ax.get_xlim()) * 0.12:
         ax.text((x0 + x1) / 2, y, text, ha="center", va="center",
                 color="white", fontsize=10)
     else:
-        outside = 0.006 * np.sign(x1 - x0 or 1)
-        ax.text(x1 + outside, y, text, va="center", fontsize=10, color=color,
-                ha="left" if outside > 0 else "right")
+        # Keep thin-bar labels to the right so they cannot overlap predictor names.
+        outside = np.ptp(ax.get_xlim()) * 0.012
+        ax.text(max(x0, x1) + outside, y, text, va="center", fontsize=10,
+                color=color, ha="left")
 
 
 def _waterfall_axes(ax, rows, p_base: float, p_pred: float) -> None:
     """Apply the shared waterfall styling: tick labels, guides and spines."""
     ax.set_yticks(range(len(rows)))
     ax.set_yticklabels([t for t, _ in rows][::-1], fontsize=_LABEL_SIZE)
-    ax.set_ylim(-0.7, len(rows) - 0.3)
+    ax.set_ylim(-1.0, len(rows) - 0.3)  # room below the bars for the reference label
     for line in (p_base, p_pred):
         ax.axvline(line, color="0.6", linewidth=0.9, linestyle=(0, (2, 3)), zorder=0)
-    ax.text(p_pred, len(rows) - 0.45, f"{p_pred:.0%}", ha="center", va="bottom",
+    ax.text(p_pred, len(rows) - 0.45, f"{p_pred:.1%}", ha="center", va="bottom",
             fontsize=13, fontweight="bold")
+    # The chain's starting point; the white box keeps the dashed line off the text.
+    ax.text(p_base, -0.45, f"Reference {p_base:.1%}", ha="center", va="top",
+            fontsize=_LABEL_SIZE, color="0.3",
+            bbox=dict(facecolor="white", edgecolor="none", pad=1))
     ax.xaxis.set_major_formatter(lambda v, _: f"{v:.0%}")
     ax.set_xlabel("Predicted 30-day mortality risk")
     ax.grid(axis="y", color="0.92", linewidth=0.8, linestyle=(0, (1, 3)))
@@ -257,54 +261,45 @@ def _waterfall_axes(ax, rows, p_base: float, p_pred: float) -> None:
     _normalize_fonts(ax)
 
 
-def plot_waterfall(expl, index: int, top_n: int = 15, save_path=None, label: str = ""):
+def plot_waterfall(expl, index: int, top_n: int = 15, save_path=None,
+                   group_threshold_pct: float | None = None):
     """Waterfall showing how each predictor moves one patient from base to prediction.
 
-    Contributions are shown as whole percentage points of absolute risk, chaining
-    from the cohort base rate at the bottom to this patient's prediction at the
-    top. See _probability_contributions() for how the log-odds SHAP values are put
-    on that scale, and note that the displayed integers are rounded to sum exactly
-    to the total shift.
+    Contributions are shown as percentage points of absolute risk, chaining
+    from the SHAP reference probability at the bottom to this patient's prediction
+    at the top. See _probability_contributions() for how the log-odds SHAP values
+    are put on that scale. Labels are rounded to one decimal; bars use unrounded
+    values.
 
     Args:
         expl: Explanation from compute_shap().
         index: Row position of the patient within expl.
-        top_n: Number of features to show individually (rest are pooled).
+        top_n: Number of features to show individually when no threshold is set.
         save_path: Optional PNG destination.
-        label: Optional prefix for the title (e.g. "Median-risk patient").
+        group_threshold_pct: Pool predictors whose absolute contribution is at
+            or below this percentage of the patient's summed absolute
+            contributions into one signed net contribution. When set, this
+            replaces the top_n limit.
 
     Returns:
         The created figure.
     """
     pp, p_base, p_pred = _probability_contributions(expl, index)
     names = list(expl.feature_names)
-    data = np.asarray(expl.data[index], dtype=float)
+    data = np.asarray(expl.data[index])
 
-    order = np.argsort(-np.abs(pp))
-    shown, pooled = order[:top_n], order[top_n:]
-    rows = [(f"{data[i]:g} = {names[i]}", pp[i]) for i in shown]
-    if len(pooled):
-        rows.append((f"{len(pooled)} other features", pp[pooled].sum()))
-
-    # Rounded for display, but the bars are drawn from the exact values so the
-    # chain still lands on the prediction.
-    ints = _integer_split(np.array([v for _, v in rows]),
-                          int(round((p_pred - p_base) * 100)))
+    rows = _waterfall_rows(pp, names, data, top_n, group_threshold_pct)
 
     fig, ax = plt.subplots(figsize=(10, 0.46 * len(rows) + 2.0))
     ax.set_xlim(*_waterfall_xlim(rows, p_base, p_pred))
 
     cursor = p_base
-    for y, ((text, value), shown_int) in enumerate(zip(rows[::-1], ints[::-1])):
+    for y, (_, value) in enumerate(rows[::-1]):
         color = _UP if value >= 0 else _DOWN
         _chevron(ax, cursor, cursor + value / 100.0, y, color)
-        _bar_label(ax, cursor, cursor + value / 100.0, y, shown_int, color)
+        _bar_label(ax, cursor, cursor + value / 100.0, y, value, color)
         cursor += value / 100.0
 
     _waterfall_axes(ax, rows, p_base, p_pred)
-    # The prediction is already the bold figure above the chain, so the title only
-    # has to say which patient this is.
-    prefix = f"{label} — " if label else ""
-    ax.set_title(f"{prefix}patient row {index}", fontsize=11, loc="left")
     _save(fig, save_path)
     return fig

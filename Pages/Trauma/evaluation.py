@@ -238,25 +238,6 @@ def eval_page():
                 injury (+5.5). Age (-5.6) and the remaining predictors (-1.5) lower it only slightly.
                 """
             )
-
-        col10, col11 = st.columns([1, 1])
-        with col10:
-            st.write(
-                """
-                SCAFFOLD: describe how a low predicted probability of survival should be weighed in practice —
-                for example when discussing the expected benefit of extensive surgical treatment against a
-                conservative or palliative trajectory, and how patient preferences shift the threshold at which
-                a given probability supports one option over another.
-                """
-            )
-        with col11:
-            st.write(
-                """
-                SCAFFOLD: describe how a high predicted probability of survival supports decision-making —
-                for example providing reassurance for an invasive but potentially beneficial treatment in an
-                elderly or frail patient, and where the model's estimate adds most to clinical gestalt.
-                """
-            )
     st.write("")
     st.write("")
     feedback_tool("Trauma - Evaluation")

@@ -92,7 +92,8 @@ ASIA_OPTIONS = [
 ]
 
 # The pipeline groups raw INTENTIE codes into 7 levels; send one representative
-# raw code per group. None -> NaN -> the pipeline's "unknown" level.
+# raw code per group. The pipeline's seventh level, "unknown" (a missing code), is
+# deliberately not offered: the model has not been tested with missing values.
 INTENTIE_OPTIONS = [
     ("Motor vehicle accident", 1),
     ("Other vehicle accident (bicycle / pedestrian / etc.)", 4),
@@ -100,8 +101,17 @@ INTENTIE_OPTIONS = [
     ("Low-energy fall (standing height)", 10),
     ("High-energy fall (from height)", 11),
     ("Other", 12),
-    ("Not recorded / unknown", None),
 ]
+
+# Matches waterfall_group_threshold_pct in the training repo's config/pipeline.yaml,
+# which the fitted model's embedded config predates. Predictors contributing this
+# percentage or less of the patient's summed absolute contributions are pooled.
+WATERFALL_GROUP_THRESHOLD_PCT = 5.0
+
+# Labels the training repo's config/pipeline.yaml has but the fitted model's
+# embedded config predates: INTENTIE_cat labels the row the injury-mechanism
+# dummies collapse into. The model's own labels win wherever it has one.
+FALLBACK_DISPLAY_NAMES = {"INTENTIE_cat": "Injury mechanism"}
 
 
 def labels(options):
@@ -118,16 +128,9 @@ def build_input_row(inputs):
     """Assemble the raw one-row input for the pipeline.
 
     `inputs` is keyed on the pipeline's own column names. Nothing is encoded,
-    scaled or imputed here - the pipeline does all of that internally. The only
-    conversion is "unknown mechanism" -> NaN so the pipeline's imputer sees a
-    genuine missing value.
+    scaled or imputed here - the pipeline does all of that internally.
     """
-    row = {column: inputs[column] for column in COLUMNS}
-
-    if row["INTENTIE"] is None:
-        row["INTENTIE"] = np.nan
-
-    return row
+    return {column: inputs[column] for column in COLUMNS}
 
 
 def to_frame(row):
@@ -167,7 +170,10 @@ def display_names(model):
     labels cannot drift out of step with the model that is actually loaded.
     """
     config = model.pipeline.named_steps["cleaner"].config
-    return config.get("explainability", {}).get("display_names", {})
+    return {
+        **FALLBACK_DISPLAY_NAMES,
+        **config.get("explainability", {}).get("display_names", {}),
+    }
 
 
 def compute_shap_values(model, row):
@@ -182,14 +188,21 @@ def compute_shap_values(model, row):
     numbers, no cohort.
 
     Layout, grouping and labels all come from the vendored training-repo code, so
-    the result is interchangeable with `explainability.shap_values.compute_shap`.
+    the result is interchangeable with `explainability.shap_values.compute_shap`
+    called with the groups the training repo's waterfalls use.
 
     Returns a shap.Explanation holding a single patient (index 0), on the
     log-odds scale, or None if it could not be built.
     """
     import shap
 
-    from explainability.shap_values import _collapse, display_frame, spline_groups
+    from explainability.shap_values import (
+        _collapse,
+        _onehot_levels,
+        display_frame,
+        onehot_groups,
+        spline_groups,
+    )
 
     try:
         X = to_frame(row)
@@ -210,17 +223,23 @@ def compute_shap_values(model, row):
         if not np.allclose(values.sum(axis=1) + intercept, expected, atol=1e-6):
             raise ValueError("SHAP values are not additive w.r.t. decision_function.")
 
-        # Grouped after the additivity check, which summing preserves. Only the
-        # age spline is grouped: its basis columns partly cancel and mean nothing
-        # apart. The mechanism dummies stay separate, as in the manuscript.
-        values, X_display = _collapse(values, X_display, spline_groups(model))
+        # Grouped after the additivity check, which summing preserves. As in the
+        # training repo's waterfalls, the age spline basis and the mutually
+        # exclusive injury-mechanism dummies are each summed into one row, and the
+        # mechanism row shows the patient's level rather than a dummy indicator.
+        values, X_display = _collapse(
+            values,
+            X_display,
+            {**spline_groups(model), **onehot_groups(model)},
+            _onehot_levels(model, X_display),
+        )
 
         names = [display_names(model).get(c, c) for c in X_display.columns]
 
         return shap.Explanation(
             values=values,
             base_values=np.full(len(X_model), intercept),
-            data=X_display.to_numpy(dtype=float),
+            data=X_display.to_numpy(),
             feature_names=names,
         )
     except Exception as e:  # noqa: BLE001 - the plot is optional, the prediction is not
@@ -228,21 +247,17 @@ def compute_shap_values(model, row):
         return None
 
 
-def plot_explanation(explanation, top_n=15):
-    """Waterfall for this patient, using the training repo's plotting code.
+def plot_explanation(explanation):
+    """Waterfall for this patient, drawn exactly as the training repo draws its examples.
 
     Contributions are shown as percentage points of absolute risk, chaining from
-    the cohort base rate to this patient's prediction. That rescaling is an
-    allocation of the total risk difference rather than each predictor's marginal
-    effect; signs and ranking are unchanged. See
+    the SHAP reference probability to this patient's prediction. That rescaling is
+    an allocation of the total risk difference rather than each predictor's
+    marginal effect; signs and ranking are unchanged. See
     `explainability.plots._probability_contributions`.
     """
     from explainability.plots import plot_waterfall
 
-    fig = plot_waterfall(explanation, index=0, top_n=top_n)
-    # The repo's title identifies a row within a cohort, which means nothing for
-    # a single patient entered by hand. It is set with loc="left", so it has to
-    # be cleared in that slot rather than the default centre one.
-    if fig.axes:
-        fig.axes[0].set_title("", loc="left")
-    return fig
+    return plot_waterfall(
+        explanation, index=0, group_threshold_pct=WATERFALL_GROUP_THRESHOLD_PCT
+    )
