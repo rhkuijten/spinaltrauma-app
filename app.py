@@ -6,13 +6,13 @@ from styles import apply_custom_css
 apply_custom_css()
 
 def main():
-    users = fetch_users_from_db()
-
     if "cookies" not in st.session_state:
         st.session_state.cookies = {}
 
     if not st.session_state.get("authenticated"):
-        if login(users):
+        # Only needed to log in. Fetched on every rerun, the Google Sheets round trips
+        # made each click wait seconds and ate into the Sheets read quota.
+        if login(fetch_users_from_db()):
             st.session_state["authenticated"] = True
 
     if st.session_state.get("authenticated"):

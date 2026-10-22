@@ -12,6 +12,26 @@ def reset_state():
     st.session_state["trauma_explanation_plot"] = None
 
 
+def remember_input(name):
+    """on_change for every input: keep its value under a key Streamlit never cleans up.
+
+    Streamlit deletes a widget's value whenever a script run finishes without
+    drawing it, which is every run spent on another page. The copy kept here lets
+    the form come back filled in. A changed input also clears the old prediction.
+    """
+    st.session_state[name] = st.session_state[f"_{name}"]
+    reset_state()
+
+
+def persistent_input(widget, label, name, **kwargs):
+    """Draw `widget` so that its value survives a visit to another page."""
+    # Re-seed only once Streamlit has dropped the widget's own value. Re-seeding on
+    # every run would also overwrite whatever the user is typing at that moment.
+    if f"_{name}" not in st.session_state and name in st.session_state:
+        st.session_state[f"_{name}"] = st.session_state[name]
+    return widget(label, key=f"_{name}", on_change=remember_input, args=(name,), **kwargs)
+
+
 def trauma_page():
 
     st.header("Decision Tool")
@@ -21,33 +41,44 @@ def trauma_page():
     st.markdown("<h2 class='section-header'>Patient characteristics</h2>", unsafe_allow_html=True)
     col1, col2 = st.columns(2)
     with col1:
-        age = st.number_input(
-            "Age (years)", value=None, min_value=18, max_value=120, step=1, on_change=reset_state
+        age = persistent_input(
+            st.number_input,
+            "Age (years)",
+            "trauma_age",
+            value=None,
+            min_value=18,
+            max_value=120,
+            step=1,
         )
-        bmi = st.number_input(
+        bmi = persistent_input(
+            st.number_input,
             "BMI (kg/m²)",
+            "trauma_bmi",
             value=None,
             min_value=10.0,
             max_value=80.0,
             step=0.1,
             format="%0.1f",
-            on_change=reset_state,
         )
     with col2:
-        sex = st.radio("Sex", tu.labels(tu.SEX_OPTIONS), index=None, on_change=reset_state)
-        asa = st.selectbox(
+        sex = persistent_input(
+            st.radio, "Sex", "trauma_sex", options=tu.labels(tu.SEX_OPTIONS), index=None
+        )
+        asa = persistent_input(
+            st.selectbox,
             "ASA classification",
-            tu.labels(tu.ASA_OPTIONS),
+            "trauma_asa",
+            options=tu.labels(tu.ASA_OPTIONS),
             index=None,
-            on_change=reset_state,
             help="American Society of Anesthesiologists physical status classification.",
         )
 
-    mfi5 = st.selectbox(
+    mfi5 = persistent_input(
+        st.selectbox,
         "mFI-5 frailty index",
-        tu.labels(tu.MFI5_OPTIONS),
+        "trauma_mfi5",
+        options=tu.labels(tu.MFI5_OPTIONS),
         index=None,
-        on_change=reset_state,
         help="5-item modified frailty index: number of items present. "
         "Three or more items are treated as a single group by the model.",
     )
@@ -55,35 +86,39 @@ def trauma_page():
     st.markdown("<h2 class='section-header'>Injury</h2>", unsafe_allow_html=True)
     col3, col4 = st.columns(2)
     with col3:
-        intentie = st.selectbox(
+        intentie = persistent_input(
+            st.selectbox,
             "Injury mechanism",
-            tu.labels(tu.INTENTIE_OPTIONS),
+            "trauma_intentie",
+            options=tu.labels(tu.INTENTIE_OPTIONS),
             index=None,
-            on_change=reset_state,
         )
-        iss08 = st.number_input(
+        iss08 = persistent_input(
+            st.number_input,
             "Injury Severity Score (ISS-08)",
+            "trauma_iss08",
             value=None,
             min_value=0,
             max_value=75,
             step=1,
-            on_change=reset_state,
             help="Injury Severity Score based on AIS 2008.",
         )
     with col4:
-        n_fractures = st.number_input(
+        n_fractures = persistent_input(
+            st.number_input,
             "Number of fractures",
+            "trauma_n_fractures",
             value=None,
             min_value=1,
             step=1,
-            on_change=reset_state,
             help="Total number of spinal fractures.",
         )
-        tbi_ct = st.radio(
+        tbi_ct = persistent_input(
+            st.radio,
             "Traumatic brain injury on CT",
-            tu.labels(tu.TBI_CT_OPTIONS),
+            "trauma_tbi_ct",
+            options=tu.labels(tu.TBI_CT_OPTIONS),
             index=None,
-            on_change=reset_state,
         )
 
     st.markdown("<h2 class='section-header'>Spinal injury</h2>", unsafe_allow_html=True)
@@ -92,8 +127,8 @@ def trauma_page():
         st.write("**AO Spine fracture type(s)**")
         st.caption("Types are not mutually exclusive - tick every type present (at least one).")
         ao_types = {
-            column: st.checkbox(
-                tu.AO_TYPE_LABELS[column], key=f"ao_{column}", on_change=reset_state
+            column: persistent_input(
+                st.checkbox, tu.AO_TYPE_LABELS[column], f"trauma_ao_{column}"
             )
             for column in tu.AO_TYPE_COLUMNS
         }
@@ -101,18 +136,19 @@ def trauma_page():
         st.write("**Spinal region(s) involved**")
         st.caption("Tick every region involved (at least one).")
         regions = {
-            column: st.checkbox(
-                tu.REGION_LABELS[column], key=f"region_{column}", on_change=reset_state
+            column: persistent_input(
+                st.checkbox, tu.REGION_LABELS[column], f"trauma_region_{column}"
             )
             for column in tu.REGION_COLUMNS
         }
 
     st.markdown("<h2 class='section-header'>Neurology</h2>", unsafe_allow_html=True)
-    asia = st.selectbox(
+    asia = persistent_input(
+        st.selectbox,
         "ASIA impairment scale",
-        tu.labels(tu.ASIA_OPTIONS),
+        "trauma_asia",
+        options=tu.labels(tu.ASIA_OPTIONS),
         index=None,
-        on_change=reset_state,
         help="Select 'Exam not performable' when the neurological examination could not be "
         "carried out, for example due to intubation, sedation, or severe traumatic brain "
         "injury. The model accounts for this automatically.",

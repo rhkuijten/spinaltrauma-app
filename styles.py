@@ -6,7 +6,9 @@ def apply_custom_css():
         .block-container {
             max-width: 1100px;
             margin: 0 auto;
-            padding: 20px;
+            /* The top padding keeps content clear of Streamlit's fixed 3.75rem
+               toolbar, which otherwise covers the first heading on each page. */
+            padding: 5rem 20px 20px;
         }
         .centered-header {
             text-align: center;
