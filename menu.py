@@ -3,9 +3,9 @@ import streamlit_antd_components as sac
 from Pages.Trauma import trauma, trauma_home
 from Pages.Trauma import evaluation
 
-# SCAFFOLD: point these at the trauma manuscript and repository.
+# SCAFFOLD: point this at the trauma manuscript once it is published.
 MANUSCRIPT_URL = 'https://pubmed.ncbi.nlm.nih.gov'
-GITHUB_URL = 'https://github.com/rhkuijten/'
+GITHUB_URL = 'https://github.com/rhkuijten/spine-trauma-30day-mortality'
 
 def create_menu():
     menu_items = [
